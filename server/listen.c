@@ -71,6 +71,15 @@ static int receive_buffer_size;
 static int use_systemd = -1;
 #endif
 
+static int is_unix_domain_socket(apr_sockaddr_t *socket_addr)
+{
+    if (socket_addr != NULL && socket_addr->hostname != NULL && *socket_addr->hostname == '/')
+    {
+        return 1;
+    }
+    return 0;
+}
+
 /* TODO: make_sock is just begging and screaming for APR abstraction */
 static apr_status_t make_sock(apr_pool_t *p, ap_listen_rec *server, int do_bind_listen)
 {
@@ -146,7 +155,10 @@ static apr_status_t make_sock(apr_pool_t *p, ap_listen_rec *server, int do_bind_
     }
 
 #if APR_TCP_NODELAY_INHERITED
-    ap_sock_disable_nagle(s);
+    if (!is_unix_domain_socket(server->bind_addr))
+    {
+        ap_sock_disable_nagle(s);
+    }
 #endif
 
 #if defined(SO_REUSEPORT)
@@ -262,7 +274,7 @@ static void ap_apply_accept_filter(apr_pool_t *p, ap_listen_rec *lis,
 
     accf = find_accf_name(server, proto);
 
-    if (accf) {
+    if (accf && !is_unix_domain_socket(lis->bind_addr)) {
 #if APR_HAS_SO_ACCEPTFILTER
         /* In APR 1.x, the 2nd and 3rd parameters are char * instead of 
          * const char *, so make a copy of those args here.
@@ -1054,7 +1066,9 @@ AP_DECLARE_NONSTD(const char *) ap_set_listener(cmd_parms *cmd, void *dummy,
     }
 #endif
 
-    if (!port) {
+    if (host != NULL && *host == '/') {
+        // Skip port validation for unix domain sockets.
+    } else if (!port) {
         return "Port must be specified";
     }
 
